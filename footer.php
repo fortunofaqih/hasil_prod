@@ -2,8 +2,8 @@
 
 <footer class="app-footer">
   <div class="container-fluid d-flex flex-column flex-md-row justify-content-between gap-1">
-    <span>&copy; <?= date('Y') ?> PT. MCP &mdash; Sistem Pemantauan Hasil Produksi</span>
-    <span class="text-mute">Dibangun dengan HTML, PHP Native &amp; MySQL</span>
+    <span>&copy; <?= date('Y') ?> PT. Mutiaracahaya Plastindo  </span>
+    <span class="text-mute">Sistem Pemantauan Hasil Produksi</span>
   </div>
 </footer>
 

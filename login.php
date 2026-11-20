@@ -42,8 +42,8 @@ require __DIR__ . '/header.php';
   <div class="card card-mcp login-card">
     <div class="text-center mb-4">
       <img src="<?= BASE_URL ?>img/logo_mcp.png" alt="Logo PT. MCP" class="login-logo">
-      <h1 class="mt-2 mb-1">PT. MCP</h1>
-      <p class="text-mute mb-0 small">Sistem Pemantauan Ambil Hasil Produksi</p>
+      <h1 class="mt-2 mb-1">LOGIN</h1>
+      <p class="text-mute mb-0 small"></p>
     </div>
 
     <?php if ($error): ?>
