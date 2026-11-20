@@ -1,0 +1,10 @@
+# File upload produksi (berisi dokumen pelanggan) tidak disimpan di repository
+/uploads/do/*
+!/uploads/do/.htaccess
+/uploads/*
+!/uploads/.htaccess
+
+# File sistem / editor
+.DS_Store
+Thumbs.db
+*.log
