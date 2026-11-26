@@ -19,11 +19,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && post('action') === 'save') {
     $siap = $_POST['siap'] ?? [];
     if (!is_array($siap)) { $siap = []; }
 
-    $stmt = $pdo->prepare('SELECT q.*, d.id AS do_id, d.no_do FROM qc_header q
-                           JOIN produksi_header p ON p.id=q.produksi_header_id
-                           JOIN do_header d ON d.id=p.do_header_id WHERE q.id=?');
+    $stmt = $pdo->prepare('SELECT q.*, d.id AS do_id, d.no_do, d.status AS do_status FROM qc_header q
+                               JOIN produksi_header p ON p.id=q.produksi_header_id
+                               JOIN do_header d ON d.id=p.do_header_id WHERE q.id=?');
     $stmt->execute([$qcId]);
     $qc = $stmt->fetch();
+    tolak_jika_closed($qc['do_status'] ?? '', 'gudang.php?act=form&id=' . $qcId);
     if (!$qc || $tgl === '') {
         set_flash('Data gudang tidak lengkap.', 'danger');
         redirect('gudang.php?act=form&id=' . $qcId);
@@ -99,7 +100,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && post('action') === 'release') {
 }
 
 // ---------------- Data ----------------
-$siapList = $pdo->query("SELECT d.id, d.no_do, d.no_spk, d.customer, d.jumlah, d.satuan, g.jumlah_siap, g.id AS gudang_id
+$siapList = $pdo->query("SELECT d.id, d.no_do, d.no_spk, d.customer, d.jumlah, d.satuan, d.status AS do_status, g.jumlah_siap, g.id AS gudang_id
     FROM do_header d
     JOIN produksi_header p ON p.do_header_id=d.id
     JOIN qc_header q ON q.produksi_header_id=p.id
@@ -110,8 +111,12 @@ $list = $pdo->query("SELECT q.*, d.no_do, d.customer, d.status AS do_status,
                     FROM qc_header q
                     JOIN produksi_header p ON p.id=q.produksi_header_id
                     JOIN do_header d ON d.id=p.do_header_id
-                    WHERE d.status='gudang' OR (d.status='koreksi' AND d.returned_to='gudang')
                     ORDER BY q.id DESC")->fetchAll();
+
+$statusSekarang = status_filter();
+$tabsStatus = status_tabs_dari(array_merge($list, $siapList), $statusSekarang, 'do_status');
+$list = status_pisah($list, $statusSekarang, 'do_status');
+$siapList = status_pisah($siapList, $statusSekarang, 'do_status');
 
 $qc = null;
 $details = [];
@@ -119,6 +124,7 @@ $gData = null;
 $gRows = [];
 if ($act === 'form' && $id > 0) {
     $stmt = $pdo->prepare('SELECT q.*, d.no_do, d.customer, d.id AS do_id, d.tgl_ambil, d.no_spk,
+                           d.status AS do_status, d.file_do, d.created_by AS do_created_by, d.created_at AS do_created_at,
                            p.jenis_proses, p.catatan AS catatan_ppic, qh.jumlah_lolos
                            FROM qc_header q
                            JOIN produksi_header p ON p.id=q.produksi_header_id
@@ -154,10 +160,45 @@ require __DIR__ . '/header.php';
     <div><h1>Konfirmasi Gudang</h1><div class="page-subtitle">SPK <?= e($qc['no_spk']) ?> &middot; DO <?= e($qc['no_do']) ?></div></div>
     <a class="btn btn-outline-secondary" href="<?= BASE_URL ?>gudang.php">&larr; Kembali</a>
   </div>
+  <?= audit_card($qc ?: null, 'Audit Data QC') ?>
+  <?= audit_card($gData ?: null, 'Audit Data Gudang') ?>
+
+  <div class="card card-mcp">
+    <div class="card-header">Lampiran DO dari Marketing</div>
+    <div class="card-body">
+      <div class="mb-3 small text-mute">
+        DO dibuat oleh <?= user_label($qc['do_created_by'] ?? null) ?> pada <?= e(format_waktu($qc['do_created_at'] ?? null)) ?>
+      </div>
+      <?php if (empty($qc['file_do'])): ?>
+        <div class="text-mute small">Marketing tidak mengunggah lampiran DO.</div>
+      <?php else: ?>
+        <?php
+          $fileUrl = BASE_URL . 'uploads/do/' . rawurlencode($qc['file_do']);
+          $fileExt = strtolower(pathinfo($qc['file_do'], PATHINFO_EXTENSION));
+        ?>
+        <div class="d-flex flex-wrap gap-2">
+          <a class="btn btn-sm btn-outline-primary" href="<?= e($fileUrl) ?>" target="_blank" rel="noopener">
+            <i class="bi bi-box-arrow-up-right"></i> Buka Lampiran DO
+          </a>
+          <a class="btn btn-sm btn-outline-secondary" href="<?= e($fileUrl) ?>" download>
+            <i class="bi bi-download"></i> Unduh
+          </a>
+          <span class="align-self-center small text-mute"><?= e($qc['file_do']) ?></span>
+        </div>
+        <?php if (in_array($fileExt, ['jpg', 'jpeg', 'png'], true)): ?>
+          <div class="mt-3"><img class="file-preview" src="<?= e($fileUrl) ?>" alt="Lampiran DO"></div>
+        <?php elseif ($fileExt === 'pdf'): ?>
+          <div class="mt-3"><iframe class="w-100" style="height:300px;border:1px solid var(--mcp-border);border-radius:10px"
+                                    src="<?= e($fileUrl) ?>" title="Lampiran DO"></iframe></div>
+        <?php endif; ?>
+      <?php endif; ?>
+    </div>
+  </div>
+
   <?php if ($qc['do_status'] === 'koreksi' && !empty($qc['catatan_koreksi'])): ?>
     <div class="alert alert-warning"><?= e($qc['catatan_koreksi']) ?></div>
   <?php endif; ?>
-  <form method="post" action="">
+  <form method="post" action=""<?= form_readonly_attr($qc['do_status'] ?? '') ?>>
     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
     <input type="hidden" name="action" value="save">
     <input type="hidden" name="qc_id" value="<?= (int)$qc['id'] ?>">
@@ -181,7 +222,7 @@ require __DIR__ . '/header.php';
                  value="<?= e($gData['tgl_verifikasi'] ?? date('Y-m-d')) ?>">
         </div>
         <div class="table-responsive-mcp">
-          <table class="table table-mcp mb-0" style="min-width:560px">
+          <table data-scalable data-search-placeholder="Cari data..." class="table table-mcp mb-0" style="min-width:560px">
             <thead><tr><th>Ukuran</th><th>Lolos QC</th><th>Satuan</th><th>Jumlah Siap Diambil</th></tr></thead>
             <tbody>
               <?php foreach ($details as $d): ?>
@@ -210,12 +251,13 @@ require __DIR__ . '/header.php';
 <section>
   <div class="page-heading"><div><h1>Antrian Gudang</h1><div class="page-subtitle">Barang yang lolos QC dan menunggu verifikasi gudang</div></div></div>
 
+  <?= $tabsStatus ?>
   <?php if ($siapList): ?>
   <div class="card card-mcp border-success">
     <div class="card-header text-success">Sudah Disetujui Manager &mdash; Boleh Dilepas</div>
     <div class="card-body p-0">
       <div class="table-responsive-mcp">
-        <table class="table table-mcp mb-0" style="min-width:620px">
+        <table data-scalable data-search-placeholder="Cari data..." class="table table-mcp mb-0" style="min-width:620px">
           <thead><tr><th>No. DO</th><th>No. SPK</th><th>Customer</th><th>Siap Diambil</th><th>Aksi</th></tr></thead>
           <tbody>
             <?php foreach ($siapList as $s): ?>
@@ -247,7 +289,7 @@ require __DIR__ . '/header.php';
         <div class="empty-state">Tidak ada barang yang menunggu verifikasi gudang.</div>
       <?php else: ?>
         <div class="table-responsive-mcp">
-          <table class="table table-mcp mb-0">
+          <table data-scalable data-search-placeholder="Cari data..." class="table table-mcp mb-0">
             <thead><tr><th>No. DO</th><th>No. SPK</th><th>Customer</th><th>Lolos QC</th><th>Status</th><th>Aksi</th></tr></thead>
             <tbody>
               <?php foreach ($list as $row): ?>
@@ -257,8 +299,14 @@ require __DIR__ . '/header.php';
                   <td><?= e($row['customer']) ?></td>
                   <td><?= e(format_angka($row['jumlah_lolos'])) ?></td>
                   <td><?= status_badge($row['do_status']) ?></td>
-                  <td class="action-col"><a class="btn btn-sm btn-primary" href="<?= BASE_URL ?>gudang.php?act=form&id=<?= (int)$row['id'] ?>">
-                    <?= (int)$row['sudah'] > 0 ? 'Koreksi' : 'Verifikasi' ?></a></td>
+                  <td class="action-col">
+                    <?php if (status_is_open($row['do_status'] ?? '')): ?>
+                      <a class="btn btn-sm btn-primary" href="<?= BASE_URL ?>gudang.php?act=form&id=<?= (int)$row['id'] ?>">
+                        <?= (int)$row['sudah'] > 0 ? 'Koreksi' : 'Verifikasi' ?></a>
+                    <?php else: ?>
+                      <a class="btn btn-sm btn-outline-secondary" href="<?= BASE_URL ?>gudang.php?act=form&id=<?= (int)$row['id'] ?>">Lihat</a>
+                    <?php endif; ?>
+                  </td>
                 </tr>
               <?php endforeach; ?>
             </tbody>

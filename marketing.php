@@ -15,10 +15,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && post('action') === 'save') {
     }
 
     $editId = (int) post('id');
+    $cekSt = $pdo->prepare('SELECT status FROM do_header WHERE id=?');
+    $cekSt->execute([$editId]);
+    tolak_jika_closed($cekSt->fetchColumn(), 'marketing.php?act=form&id=' . $editId . '');
     $data = [
         'no_do'     => strtoupper(post('no_do')),
         'no_spk'    => strtoupper(post('no_spk')),
-        'tgl_order' => post('tgl_order'),
         'tgl_ambil' => post('tgl_ambil'),
         'customer'  => post('customer'),
         'category'  => post('category'),
@@ -28,7 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && post('action') === 'save') {
         'kategori_kirim' => in_array(post('kategori_kirim'), ['Kirim', 'Las'], true) ? post('kategori_kirim') : 'Kirim',
     ];
 
-    if ($data['no_do'] === '' || $data['no_spk'] === '' || $data['tgl_order'] === '' || $data['tgl_ambil'] === ''
+    if ($data['no_do'] === '' || $data['no_spk'] === '' || $data['tgl_ambil'] === ''
         || $data['customer'] === '' || $data['jumlah'] <= 0) {
         set_flash('Lengkapi semua field wajib dengan benar.', 'danger');
         redirect('marketing.php?act=form' . ($editId ? '&id=' . $editId : ''));
@@ -47,16 +49,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && post('action') === 'save') {
         $pdo->beginTransaction();
 
         if ($editId > 0) {
-            $old = $pdo->prepare('SELECT file_do FROM do_header WHERE id=?');
+            $old = $pdo->prepare('SELECT file_do, status, returned_to FROM do_header WHERE id=?');
             $old->execute([$editId]);
-            $existing = $old->fetchColumn();
+            $current = $old->fetch();
+            $existing = $current['file_do'] ?? null;
+            $statusBaru = ($current['status'] === 'koreksi' && $current['returned_to'] === 'marketing')
+                ? 'ppic' : $current['status'];
 
-            $sql = 'UPDATE do_header SET no_do=?, no_spk=?, tgl_order=?, tgl_ambil=?, customer=?, category=?,
+            $sql = 'UPDATE do_header SET no_do=?, no_spk=?, tgl_ambil=?, customer=?, category=?,
                     ukuran=?, jumlah=?, satuan=?, kategori_kirim=?, status=?, returned_to=NULL, catatan_koreksi=NULL,
                     modified_by=?, modified_at=?';
-            $params = [$data['no_do'], $data['no_spk'], $data['tgl_order'], $data['tgl_ambil'], $data['customer'],
+            $params = [$data['no_do'], $data['no_spk'], $data['tgl_ambil'], $data['customer'],
                        $data['category'], $data['ukuran'], $data['jumlah'], $data['satuan'], $data['kategori_kirim'],
-                       'ppic', user_id(), date('Y-m-d H:i:s')];
+                       $statusBaru, user_id(), date('Y-m-d H:i:s')];
             if ($fileName) {
                 $sql .= ', file_do=?';
                 $params[] = $fileName;
@@ -68,14 +73,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && post('action') === 'save') {
             $pdo->prepare('UPDATE do_detail SET ukuran=?, jumlah=?, satuan=?, modified_by=?, modified_at=? WHERE do_header_id=?')
                 ->execute([$data['ukuran'], $data['jumlah'], $data['satuan'], user_id(), date('Y-m-d H:i:s'), $editId]);
 
+            // Propagasi ke PPIC/QC/Gudang: baris detail produksi ikut diperbarui.
+            $pdo->prepare('UPDATE produksi_detail SET ukuran=?, jumlah=?, satuan=?, modified_by=?, modified_at=?
+                           WHERE do_detail_id IN (SELECT id FROM do_detail WHERE do_header_id=?)')
+                ->execute([$data['ukuran'], $data['jumlah'], $data['satuan'], user_id(), date('Y-m-d H:i:s'), $editId]);
+
             $doId = $editId;
-            $note = 'Koreksi data DO oleh marketing: ' . $data['no_do'];
+            $note = 'Edit data DO oleh marketing: ' . $data['no_do'];
         } else {
             $stmt = $pdo->prepare('INSERT INTO do_header
-                (no_do, no_spk, tgl_order, tgl_ambil, customer, category, ukuran, jumlah, satuan, kategori_kirim,
+                (no_do, no_spk, tgl_ambil, customer, category, ukuran, jumlah, satuan, kategori_kirim,
                  file_do, status, created_by, modified_by, created_at, modified_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,\'ppic\',?,?,NOW(),NOW())');
-            $stmt->execute([$data['no_do'], $data['no_spk'], $data['tgl_order'], $data['tgl_ambil'], $data['customer'],
+                VALUES (?,?,?,?,?,?,?,?,?,?,\'ppic\',?,?,NOW(),NOW())');
+            $stmt->execute([$data['no_do'], $data['no_spk'], $data['tgl_ambil'], $data['customer'],
                 $data['category'], $data['ukuran'], $data['jumlah'], $data['satuan'], $data['kategori_kirim'],
                 $fileName, user_id(), user_id()]);
             $doId = (int) $pdo->lastInsertId();
@@ -102,12 +112,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && post('action') === 'save') {
     }
 }
 
+// ---------------- Hapus DO ----------------
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && post('action') === 'delete') {
+    if (!csrf_check()) {
+        set_flash('Token keamanan tidak valid.', 'danger');
+        redirect('marketing.php');
+    }
+    $hapusId = (int) post('id');
+    $stmt = $pdo->prepare('SELECT no_do, file_do, created_by, status FROM do_header WHERE id=?');
+    $stmt->execute([$hapusId]);
+    $target = $stmt->fetch();
+
+    tolak_jika_closed($target['status'] ?? '', 'marketing.php');
+
+    if (!$target || (($target['created_by'] != user_id()) && ($user['role'] !== 'admin'))) {
+        set_flash('DO tidak ditemukan atau Anda tidak berhak menghapusnya.', 'danger');
+        redirect('marketing.php');
+    }
+
+    // FK ON DELETE CASCADE menghapus detail, produksi, QC, gudang, manager, dan tracking.
+    $pdo->prepare('DELETE FROM do_header WHERE id=?')->execute([$hapusId]);
+    if (!empty($target['file_do'])) {
+        @unlink(UPLOAD_DO_DIR . $target['file_do']);
+    }
+    set_flash('DO ' . $target['no_do'] . ' beserta seluruh alurnya berhasil dihapus.');
+    redirect('marketing.php');
+}
+
 // ---------------- Data ----------------
 $where = ($user['role'] === 'marketing') ? 'WHERE d.created_by = ?' : '';
 $params = ($user['role'] === 'marketing') ? [user_id()] : [];
 $rows = $pdo->prepare("SELECT d.*, u.nama AS input_by FROM do_header d LEFT JOIN users u ON u.id=d.created_by $where ORDER BY d.id DESC");
 $rows->execute($params);
 $list = $rows->fetchAll();
+
+$statusSekarang = status_filter();
+$tabsStatus = status_tabs_dari($list, $statusSekarang);
+$list = status_pisah($list, $statusSekarang);
 
 $edit = null;
 if ($act === 'form' && $id > 0) {
@@ -133,7 +174,8 @@ require __DIR__ . '/header.php';
     <div><h1><?= $edit ? 'Koreksi DO' : 'Input DO Baru' ?></h1><div class="page-subtitle">Form Delivery Order &mdash; Marketing</div></div>
     <a class="btn btn-outline-secondary" href="<?= BASE_URL ?>marketing.php">&larr; Kembali</a>
   </div>
-  <form method="post" enctype="multipart/form-data" action="">
+  <?= audit_card($edit ?: null, 'Audit Data DO') ?>
+  <form method="post" enctype="multipart/form-data" action=""<?= form_readonly_attr($edit['status'] ?? '') ?>>
     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
     <input type="hidden" name="action" value="save">
     <input type="hidden" name="id" value="<?= $edit ? (int)$edit['id'] : 0 ?>">
@@ -149,10 +191,6 @@ require __DIR__ . '/header.php';
           <div class="col-12 col-md-6">
             <label for="no_spk" class="form-label">No. SPK <span class="text-danger">*</span></label>
             <input type="text" class="form-control" id="no_spk" name="no_spk" required value="<?= e($edit['no_spk'] ?? '') ?>">
-          </div>
-          <div class="col-12 col-md-6">
-            <label for="tgl_order" class="form-label">Tanggal Order <span class="text-danger">*</span></label>
-            <input type="date" class="form-control" id="tgl_order" name="tgl_order" required value="<?= e($edit['tgl_order'] ?? '') ?>">
           </div>
           <div class="col-12 col-md-6">
             <label for="tgl_ambil" class="form-label">Tanggal Ambil Hasil Produksi <span class="text-danger">*</span></label>
@@ -221,7 +259,7 @@ require __DIR__ . '/header.php';
       <dl class="kv">
         <dt>No. DO</dt><dd><?= e($detail['no_do']) ?></dd>
         <dt>No. SPK</dt><dd><?= e($detail['no_spk']) ?></dd>
-        <dt>Tgl. Order</dt><dd><?= e(format_tanggal($detail['tgl_order'])) ?></dd>
+        <dt>Tgl. Order (PPIC)</dt><dd><?= e(format_tanggal($detail['tgl_order'])) ?></dd>
         <dt>Tgl. Ambil</dt><dd><?= e(format_tanggal($detail['tgl_ambil'])) ?></dd>
         <dt>Customer</dt><dd><?= e($detail['customer']) ?></dd>
         <dt>Category</dt><dd><?= e($detail['category']) ?></dd>
@@ -233,6 +271,7 @@ require __DIR__ . '/header.php';
           <dt class="text-danger">Catatan koreksi</dt><dd class="text-danger"><?= e($detail['catatan_koreksi']) ?></dd>
         <?php endif; ?>
       </dl>
+      <?= audit_card($detail ?: null, 'Audit Data DO') ?>
       <?php if (!empty($detail['file_do'])): ?>
         <div class="mt-3">
           <a class="btn btn-sm btn-outline-primary" href="<?= BASE_URL ?>uploads/do/<?= e($detail['file_do']) ?>" target="_blank" rel="noopener">Buka DO</a>
@@ -252,6 +291,7 @@ require __DIR__ . '/header.php';
     <div><h1>Data Delivery Order</h1><div class="page-subtitle">Daftar DO yang sudah dibuat marketing</div></div>
     <a class="btn btn-primary" href="<?= BASE_URL ?>marketing.php?act=form">+ Input DO</a>
   </div>
+  <?= $tabsStatus ?>
   <div class="card card-mcp">
     <div class="card-body p-0">
       <?php if (!$list): ?>
@@ -262,7 +302,6 @@ require __DIR__ . '/header.php';
             <thead><tr><th>No. DO</th><th>No. SPK</th><th>Customer</th><th>Tgl Ambil</th><th>Jumlah</th><th>Status</th><th>Aksi</th></tr></thead>
             <tbody>
               <?php foreach ($list as $row): ?>
-                <?php $bolehEdit = $row['status'] === 'koreksi' && $row['returned_to'] === 'marketing'; ?>
                 <tr>
                   <td><?= e($row['no_do']) ?></td>
                   <td><?= e($row['no_spk']) ?></td>
@@ -272,8 +311,17 @@ require __DIR__ . '/header.php';
                   <td><?= status_badge($row['status']) ?></td>
                   <td class="action-col">
                     <a class="btn btn-sm btn-outline-secondary" href="<?= BASE_URL ?>marketing.php?act=detail&id=<?= (int)$row['id'] ?>">Detail</a>
-                    <?php if ($bolehEdit): ?>
-                      <a class="btn btn-sm btn-danger" href="<?= BASE_URL ?>marketing.php?act=form&id=<?= (int)$row['id'] ?>">Koreksi</a>
+                    <?php if (status_is_open($row['status'])): ?>
+                    <a class="btn btn-sm btn-outline-primary" href="<?= BASE_URL ?>marketing.php?act=form&id=<?= (int)$row['id'] ?>">Edit</a>
+                    <form method="post" action="" class="d-inline">
+                      <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                      <input type="hidden" name="action" value="delete">
+                      <input type="hidden" name="id" value="<?= (int)$row['id'] ?>">
+                      <button type="submit" class="btn btn-sm btn-outline-danger"
+                              data-confirm="Hapus DO <?= e($row['no_do']) ?> beserta seluruh alurnya?">Delete</button>
+                    </form>
+                    <?php else: ?>
+                      <a class="btn btn-sm btn-outline-secondary" href="<?= BASE_URL ?>marketing.php?act=form&id=<?= (int)$row['id'] ?>">Lihat</a>
                     <?php endif; ?>
                   </td>
                 </tr>

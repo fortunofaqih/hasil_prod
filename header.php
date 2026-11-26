@@ -29,7 +29,7 @@ $flash = get_flash();
   <link rel="icon" href="<?= BASE_URL ?>img/logo_mcp.png" type="image/png">
   <link rel="stylesheet" href="<?= BASE_URL ?>library/bootstrap/css/bootstrap.min.css">
   <link rel="stylesheet" href="<?= BASE_URL ?>library/bootstrap-icons/bootstrap-icons.min.css">
-  <link rel="stylesheet" href="<?= BASE_URL ?>css/app.css">
+  <link rel="stylesheet" href="<?= BASE_URL ?>css/app.css?v=11">
 </head>
 <body>
 <header class="app-header sticky-top">
@@ -61,7 +61,7 @@ $flash = get_flash();
         </ul>
         <div class="nav-user d-flex align-items-center gap-2">
           <span class="badge bg-light text-dark rounded-pill"><?= e(strtoupper($user['role'])) ?></span>
-          <span class="nav-name"><?= e($user['nama']) ?></span>
+          <span class="nav-name"><i class="bi bi-person-circle me-1" aria-hidden="true"></i><?= e($user['nama']) ?></span>
           <a class="btn btn-sm btn-outline-light" href="<?= BASE_URL ?>ganti_password.php"
              title="Ganti password" aria-label="Ganti password">
             <i class="bi bi-key" aria-hidden="true"></i><span class="d-none d-lg-inline"> Ganti Password</span>

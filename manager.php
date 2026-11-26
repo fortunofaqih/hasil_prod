@@ -94,6 +94,10 @@ $list = $pdo->query("SELECT d.id, d.no_do, d.no_spk, d.customer, d.status, d.tgl
                      (SELECT COUNT(*) FROM tracking_header t WHERE t.do_header_id=d.id) AS jml_track
                      FROM do_header d ORDER BY d.id DESC")->fetchAll();
 
+$statusSekarang = status_filter();
+$tabsStatus = status_tabs_dari($list, $statusSekarang);
+$list = status_pisah($list, $statusSekarang);
+
 $do = null;
 $timeline = [];
 $stages = [];
@@ -130,7 +134,7 @@ if ($act === 'detail' && $id > 0) {
             'Produksi'  => $pdo->query("SELECT no_spk, jenis_proses, tgl_rencana_roll, tgl_realisasi_roll, tgl_rencana_potong, tgl_realisasi_potong, created_at FROM produksi_header WHERE do_header_id=$id ORDER BY id DESC LIMIT 1")->fetch(),
             'QC'        => $pdo->query("SELECT q.no_spk, q.jumlah_lolos, q.tgl_verifikasi, q.catatan FROM qc_header q JOIN produksi_header p ON p.id=q.produksi_header_id WHERE p.do_header_id=$id ORDER BY q.id DESC LIMIT 1")->fetch(),
             'Gudang'    => $pdo->query("SELECT g.no_spk, g.jumlah_siap, g.tgl_verifikasi, g.status, g.released_at FROM gudang_header g JOIN qc_header q ON q.id=g.qc_header_id JOIN produksi_header p ON p.id=q.produksi_header_id WHERE p.do_header_id=$id ORDER BY g.id DESC LIMIT 1")->fetch(),
-            'Manager'   => $pdo->query("SELECT status, catatan, tgl_verifikasi, released_at FROM manager_header WHERE do_header_id=$id ORDER BY id DESC LIMIT 1")->fetch(),
+            'Manager'   => $pdo->query("SELECT status, catatan, tgl_verifikasi, released_at, created_by, modified_by, created_at, modified_at FROM manager_header WHERE do_header_id=$id ORDER BY id DESC LIMIT 1")->fetch(),
         ];
     }
 }
@@ -243,7 +247,7 @@ require __DIR__ . '/header.php';
               $satuan = $qtyRows[0]['satuan'];
             ?>
             <div class="table-responsive-mcp">
-              <table class="table table-mcp mb-0" style="min-width:720px">
+              <table data-scalable data-search-placeholder="Cari data..." class="table table-mcp mb-0" style="min-width:720px">
                 <thead>
                   <tr>
                     <th>Ukuran</th><th>Satuan</th>
@@ -297,6 +301,9 @@ require __DIR__ . '/header.php';
           <?php endif; ?>
         </div>
       </div>
+
+      <?= audit_card($do, 'Audit Data DO (Marketing)') ?>
+      <?= audit_card($stages['Manager'] ?: null, 'Audit Verifikasi Manager') ?>
 
       <?php if (!in_array($do['status'], ['gagal', 'siap_ambil', 'selesai'], true)): ?>
       <div class="card card-mcp">
@@ -366,13 +373,14 @@ require __DIR__ . '/header.php';
 <?php else: ?>
 <section>
   <div class="page-heading"><div><h1>Verifikasi Manager</h1><div class="page-subtitle">Periksa history DO/SPK dari marketing sampai gudang</div></div></div>
+  <?= $tabsStatus ?>
   <div class="card card-mcp">
     <div class="card-body p-0">
       <?php if (!$list): ?>
         <div class="empty-state">Belum ada data DO.</div>
       <?php else: ?>
         <div class="table-responsive-mcp">
-          <table class="table table-mcp mb-0">
+          <table data-scalable data-search-placeholder="Cari data..." class="table table-mcp mb-0">
             <thead><tr><th>No. DO</th><th>No. SPK</th><th>Customer</th><th>Tgl Ambil</th><th>Status</th><th>Aksi</th></tr></thead>
             <tbody>
               <?php foreach ($list as $row): ?>

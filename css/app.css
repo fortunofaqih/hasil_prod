@@ -40,7 +40,27 @@ body {
 .navbar .nav-icon i { font-size: 1rem; line-height: 1; }
 .navbar .nav-link.active { background: rgba(255,255,255,.13); border-radius: 8px; }
 .nav-user { flex-wrap: wrap; }
-.nav-user .nav-name { font-size: .85rem; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-tabs.flex-nowrap { flex-wrap: nowrap !important; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
+.nav-tabs.flex-nowrap .nav-link { white-space: nowrap; flex-shrink: 0; }
+/* Data referensi dari marketing/satpam: abu-abu muda, angka tetap gelap dan jelas. */
+.readonly-field, input[readonly].readonly-field {
+  background-color: #e9ecef !important;
+  color: #212529 !important;
+  opacity: 1 !important;
+  border-color: #ced4da !important;
+  font-weight: 600;
+}
+.nav-user .nav-name {
+  color: #fff !important;
+  font-weight: 600;
+  font-size: .85rem;
+  letter-spacing: .01em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .3);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .app-main { flex: 1 0 auto; width: 100%; max-width: 100%; }
 .app-footer {
@@ -139,6 +159,30 @@ body {
 
 .chart-box { position: relative; height: 280px; width: 100%; }
 @media (max-width: 767.98px) { .chart-box { height: 240px; } }
+
+/* Daftar panjang: batas tinggi area scroll + header tabel melekat */
+.table-scroll-box { max-height: 60vh; overflow: auto; }
+.table-scroll-box .table-mcp thead th { position: sticky; top: 0; z-index: 2; background: #f8fafc; }
+.table-toolbar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; padding: .75rem; }
+.table-toolbar .form-control { max-width: 240px; }
+.mobile-scroll-hint { display: none; font-size: .75rem; color: var(--mcp-muted); padding: 0 .75rem .5rem; }
+@media (max-width: 767.98px) {
+  .table-scroll-box { max-height: 52vh; }
+  .mobile-scroll-hint { display: block; }
+  .table-toolbar .form-control { max-width: none; flex: 1 1 100%; }
+}
+
+.form-check-card {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  min-height: 54px;
+  padding: .85rem 1rem;
+  margin-bottom: .5rem;
+}
+.form-check-card .form-check-input { margin-top: 0; width: 1.15rem; height: 1.15rem; flex-shrink: 0; }
+.form-check-card .form-check-label { font-size: .9rem; line-height: 1.35; }
+.form-check-card:has(input:checked) { border-color: var(--mcp-blue) !important; background: rgba(13,79,139,.05); }
 
 /* Utility */
 .kv { display: grid; grid-template-columns: 120px 1fr; gap: .3rem .6rem; font-size: .87rem; }

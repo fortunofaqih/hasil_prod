@@ -148,7 +148,7 @@ require __DIR__ . '/header.php';
           <div class="card-header">Daftar User</div>
           <div class="card-body p-0">
             <div class="table-responsive-mcp">
-              <table class="table table-mcp mb-0" style="min-width:560px">
+              <table data-scalable data-search-placeholder="Cari data..." class="table table-mcp mb-0" style="min-width:560px">
                 <thead><tr><th>User</th><th>Role</th><th>Status</th><th>Aksi</th></tr></thead>
                 <tbody>
                   <?php foreach ($users as $u): ?>
@@ -203,7 +203,7 @@ require __DIR__ . '/header.php';
           <div class="card-header">Daftar Menu</div>
           <div class="card-body p-0">
             <div class="table-responsive-mcp">
-              <table class="table table-mcp mb-0">
+              <table data-scalable data-search-placeholder="Cari data..." class="table table-mcp mb-0">
                 <thead><tr><th>Menu</th><th>Route</th><th>Status</th><th>Aksi</th></tr></thead>
                 <tbody>
                   <?php foreach ($adminMenus as $m): ?>
@@ -240,7 +240,7 @@ require __DIR__ . '/header.php';
           <?php endforeach; ?>
         </ul>
         <div class="table-responsive-mcp">
-          <table class="table table-mcp mb-0" style="min-width:520px">
+          <table data-scalable data-search-placeholder="Cari data..." class="table table-mcp mb-0" style="min-width:520px">
             <thead><tr><th>Menu</th><th>Route</th><th>Akses</th></tr></thead>
             <tbody>
               <?php foreach ($akses as $a): ?>

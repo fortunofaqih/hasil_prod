@@ -84,7 +84,7 @@ CREATE TABLE do_header (
   id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   no_do           VARCHAR(50) NOT NULL UNIQUE,
   no_spk          VARCHAR(50) NOT NULL,
-  tgl_order       DATE NOT NULL,
+  tgl_order       DATE NULL,
   tgl_ambil       DATE NOT NULL,
   customer        VARCHAR(150) NOT NULL,
   category        VARCHAR(100) NOT NULL,

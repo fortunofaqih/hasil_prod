@@ -151,3 +151,212 @@ function upload_do(array $file): ?string
     }
     return $nama;
 }
+
+function format_waktu(?string $datetime): string
+{
+    if (!$datetime || $datetime === '0000-00-00 00:00:00') {
+        return '-';
+    }
+    return date('d/m/Y H:i', strtotime($datetime));
+}
+
+/** Nama petugas + tautan email supaya bisa langsung dihubungi. */
+function user_label($userId): string
+{
+    $id = (int) $userId;
+    if ($id <= 0) {
+        return '-';
+    }
+    static $cache = [];
+    if (!array_key_exists($id, $cache)) {
+        $stmt = db()->prepare('SELECT nama, email FROM users WHERE id=? LIMIT 1');
+        $stmt->execute([$id]);
+        $cache[$id] = $stmt->fetch() ?: null;
+    }
+    $u = $cache[$id];
+    if (!$u) {
+        return 'User #' . $id;
+    }
+    $nama = e($u['nama']);
+    if (!empty($u['email'])) {
+        $email = e($u['email']);
+        return '<a href="mailto:' . $email . '">' . $nama . '</a> <small class="text-mute">(' . $email . ')</small>';
+    }
+    return $nama;
+}
+
+/** Hentikan aksi jika data sudah CLOSE. */
+function tolak_jika_closed($status, string $redirect): void
+{
+    if (!status_is_open($status ?? '')) {
+        set_flash('Data sudah CLOSE dan tidak bisa diubah.', 'danger');
+        redirect($redirect);
+    }
+}
+
+/** Atribut form untuk data yang sudah CLOSE (hanya bisa dilihat). */
+function form_readonly_attr($status): string
+{
+    return status_is_open($status ?? '') ? '' : ' data-readonly';
+}
+
+/** Username singkat untuk badge konfirmasi (tanpa nama panjang/email). */
+function user_username($userId): string
+{
+    $id = (int) $userId;
+    if ($id <= 0) { return '-'; }
+    static $cache = [];
+    if (!array_key_exists($id, $cache)) {
+        $stmt = db()->prepare('SELECT username FROM users WHERE id=? LIMIT 1');
+        $stmt->execute([$id]);
+        $cache[$id] = $stmt->fetchColumn();
+    }
+    return $cache[$id] ? (string) $cache[$id] : '-';
+}
+
+/** Kartu audit created_by / modified_by / created_at / modified_at. */
+function audit_card(?array $row, string $judul = 'Audit Data'): string
+{
+    $html = '<div class="card card-mcp"><div class="card-header">' . e($judul) . '</div><div class="card-body">';
+    if (!$row) {
+        return $html . '<div class="text-mute small">Belum ada data yang tersimpan.</div></div></div>';
+    }
+    $html .= '<dl class="kv">';
+    $html .= '<dt>Dibuat oleh</dt><dd>' . user_label($row['created_by'] ?? null) . '</dd>';
+    $html .= '<dt>Dibuat pada</dt><dd>' . e(format_waktu($row['created_at'] ?? null)) . '</dd>';
+    $html .= '<dt>Diubah oleh</dt><dd>' . user_label($row['modified_by'] ?? null) . '</dd>';
+    $html .= '<dt>Diubah pada</dt><dd>' . e(format_waktu($row['modified_at'] ?? null)) . '</dd>';
+    $html .= '</dl></div></div>';
+    return $html;
+}
+
+
+/** Status OPEN / CLOSE untuk tiket retur & komplain. */
+function status_tiket(string $status): string
+{
+    return $status === 'closed'
+        ? '<span class="badge bg-success">CLOSE</span>'
+        : '<span class="badge bg-warning text-dark">OPEN</span>';
+}
+
+function alasan_badge(string $alasan): string
+{
+    $map = [
+        'belum terverifikasi' => ['Belum Terverifikasi', 'bg-secondary'],
+        'gagal kirim - customer tutup' => ['Gagal Kirim - Customer Tutup', 'bg-danger'],
+        'gagal kirim - sisa sales kelilingan' => ['Gagal Kirim - Sisa Sales', 'bg-warning text-dark'],
+        'keluhan mutu' => ['Keluhan Mutu', 'bg-info text-dark'],
+        'titipan' => ['Titipan', 'bg-primary'],
+    ];
+    [$label, $class] = $map[$alasan] ?? [$alasan, 'bg-light text-dark'];
+    return '<span class="badge ' . $class . '">' . e($label) . '</span>';
+}
+
+function upload_komplain(array $file): ?string
+{
+    if (!isset($file['error']) || $file['error'] !== UPLOAD_ERR_OK || $file['size'] > MAX_UPLOAD_SIZE) {
+        return null;
+    }
+    $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+    if (!in_array($ext, ['jpg', 'jpeg', 'png', 'pdf'], true)) {
+        return null;
+    }
+    $finfo = new finfo(FILEINFO_MIME_TYPE);
+    $mime = $finfo->file($file['tmp_name']);
+    $allowed = ['jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png', 'pdf' => 'application/pdf'];
+    if (($allowed[$ext] ?? '') !== $mime) {
+        return null;
+    }
+    $nama = date('YmdHis') . '_' . bin2hex(random_bytes(6)) . '.' . $ext;
+    if (!move_uploaded_file($file['tmp_name'], UPLOAD_KOMPLAIN_DIR . $nama)) {
+        return null;
+    }
+    return $nama;
+}
+
+function nomor_otomatis(string $prefix, string $tabel, string $kolom): string
+{
+    $last = db()->query("SELECT MAX(id) FROM $tabel")->fetchColumn();
+    return $prefix . '-' . date('ymd') . '-' . str_pad((string) ((int) $last + 1), 4, '0', STR_PAD_LEFT);
+}
+
+/** Ringkasan item: "1 Roll" atau "2 Roll, 5 KG" (di-group per satuan). */
+function ringkasan_item(string $tabelDetail, string $kolomFk, int $id): string
+{
+    $whitelist = [
+        'retur_detail'    => 'retur_header_id',
+        'komplain_detail' => 'komplain_header_id',
+    ];
+    if (!isset($whitelist[$tabelDetail]) || $whitelist[$tabelDetail] !== $kolomFk) {
+        return '-';
+    }
+    $stmt = db()->prepare("SELECT satuan, SUM(jumlah) AS total FROM $tabelDetail WHERE $kolomFk=? GROUP BY satuan ORDER BY satuan");
+    $stmt->execute([$id]);
+    $bagian = [];
+    foreach ($stmt->fetchAll() as $r) {
+        $satuan = (string) $r['satuan'];
+        $satuan = in_array(strtolower($satuan), ['kg'], true) ? 'KG' : ucfirst(strtolower($satuan));
+        $bagian[] = format_angka($r['total']) . ' ' . $satuan;
+    }
+    return $bagian ? implode(', ', $bagian) : '-';
+}
+
+
+/** Status yang dianggap CLOSE. */
+function status_is_open($nilai): bool
+{
+    return !in_array(strtolower((string) $nilai), ['closed', 'close', 'selesai'], true);
+}
+
+/** Filter status halaman: default open, bisa diganti ?status=close. */
+function status_filter(): string
+{
+    return (($_GET['status'] ?? '') === 'close') ? 'close' : 'open';
+}
+
+/** Hitung jumlah baris open/close dari array baris. */
+function status_hitung(array $baris, string $kunci = 'status'): array
+{
+    $buka = 0;
+    foreach ($baris as $r) {
+        if (status_is_open($r[$kunci] ?? $r['status'] ?? '')) { $buka++; }
+    }
+    return [$buka, count($baris) - $buka];
+}
+
+/** Ambil hanya baris sesuai filter status (default open). */
+function status_pisah(array $baris, string $filter, string $kunci = 'status'): array
+{
+    $hasil = [];
+    foreach ($baris as $r) {
+        $buka = status_is_open($r[$kunci] ?? $r['status'] ?? '');
+        if (($filter === 'open' && $buka) || ($filter === 'close' && !$buka)) { $hasil[] = $r; }
+    }
+    return $hasil;
+}
+
+/** Tab status dari sekumpulan baris. */
+function status_tabs_dari(array $baris, string $filter, string $kunci = 'status'): string
+{
+    [$buka, $tutup] = status_hitung($baris, $kunci);
+    return status_tabs_ui($buka, $tutup, $filter);
+}
+
+/** Navigasi tab Open/Close untuk daftar berstatus. */
+function status_tabs_ui(int $open, int $close, string $current): string
+{
+    $params = $_GET;
+    unset($params['status']);
+    $dasar = http_build_query($params);
+    $link = static function (string $s) use ($dasar): string {
+        return '?' . ($dasar !== '' ? $dasar . '&' : '') . 'status=' . $s;
+    };
+    $aktifOpen = $current === 'open' ? ' active' : '';
+    $aktifClose = $current === 'close' ? ' active' : '';
+    return '<ul class="nav nav-tabs flex-nowrap overflow-auto mb-3" role="tablist">'
+        . '<li class="nav-item"><a class="nav-link' . $aktifOpen . '" href="' . e($link('open')) . '">'
+        . 'Open <span class="badge bg-warning text-dark">' . $open . '</span></a></li>'
+        . '<li class="nav-item"><a class="nav-link' . $aktifClose . '" href="' . e($link('close')) . '">'
+        . 'Close <span class="badge bg-success">' . $close . '</span></a></li>'
+        . '</ul>';
+}

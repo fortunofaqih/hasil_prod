@@ -8,6 +8,6 @@
 </footer>
 
 <script src="<?= BASE_URL ?>library/bootstrap/js/bootstrap.bundle.min.js"></script>
-<script src="<?= BASE_URL ?>js/app.js"></script>
+<script src="<?= BASE_URL ?>js/app.js?v=11"></script>
 </body>
 </html>
